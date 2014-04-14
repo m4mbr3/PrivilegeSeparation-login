@@ -67,7 +67,7 @@ main(void)
            memset(ps, 0, 4);
            strncpy(ps, "ps_", 3); 
            ptr = strncat(ps, lev_buf, 4);
-           authenticate_system(ptr);  
+           write(fp, ((authenticate_system(ptr) == 0 )? "OK":"NO"),2);  
         }
    close(fp);
    exit(EXIT_SUCCESS);
