@@ -1,13 +1,3 @@
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <unistd.h>
-#include <syslog.h>
-#include <string.h>
-#include <security/pam_appl.h>
 #include <security/pam_misc.h>
 #include <sys/socket.h>
 #include <linux/netlink.h>
