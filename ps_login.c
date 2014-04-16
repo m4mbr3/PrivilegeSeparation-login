@@ -9,6 +9,16 @@
 #include <string.h>
 #include <security/pam_appl.h>
 #include <security/pam_misc.h>
+#include <sys/socket.h>
+#include <linux/netlink.h>
+
+#define MAX_PAYLOAD 1024
+#define NETLINK_PS 22
+struct sockaddr_nl src_addr, dest_addr;
+struct nlmsghdr *nlh = NULL;
+struct iovec iov;
+int sock_fd;
+struct msghdr msg;
 
 static struct pam_conv local_conversation = {
     misc_conv,
@@ -19,7 +29,7 @@ authenticate_system(const char *username)
 {
     pam_handle_t *pamh = NULL;
     int retval;
-
+    fprintf(stdout, "\nEnter the password for %s\n", username);
     retval = pam_start("ps_login", username, &local_conversation, &pamh);
     if (retval == PAM_SUCCESS)
         retval = pam_authenticate(pamh, 0);
@@ -45,30 +55,53 @@ main(void)
         char *ps = (char *) malloc(sizeof(char)*4);
         char *ptr;
         char lev_buf[4];
-        int fp = open("/dev/ps_pwd", O_RDWR);
         int flag;
         int num;
-        if (fp < 0) {
-            printf ("Cannot open the char device ps_pwd under /dev\n");
+        sock_fd = socket(PF_NETLINK, SOCK_RAW, NETLINK_PS);
+        if (sock_fd < 0) {
+            printf ("Cannot open the socket\n");
             exit (-1);
         }
+        memset(&src_addr, 0, sizeof(src_addr));
+        src_addr.nl_family = AF_NETLINK;
+        src_addr.nl_pid = getpid();
+        bind(sock_fd, (struct sockaddr*) &src_addr, sizeof(src_addr));
+
+        memset(&dest_addr, 0, sizeof(dest_addr));
+        dest_addr.nl_family = AF_NETLINK;
+        dest_addr.nl_pid = 0;
+        dest_addr.nl_groups = 0;
+
+        nlh = (struct nlmsghdr *) malloc(NLMSG_SPACE(MAX_PAYLOAD));
+        memset(nlh, 0, NLMSG_SPACE(MAX_PAYLOAD));
+        nlh->nlmsg_len = NLMSG_SPACE(MAX_PAYLOAD);
+        nlh->nlmsg_pid = getpid();
+        nlh->nlmsg_flags = 0;
+
+        strcpy(NLMSG_DATA(nlh), "REGISTRATION");
+        iov.iov_base = (void *)nlh;
+        iov.iov_len = nlh->nlmsg_len;
+        msg.msg_name = (void *) &dest_addr;
+        msg.msg_namelen = sizeof (dest_addr);
+        msg.msg_iov = &iov;
+        msg.msg_iovlen = 1;
+        sendmsg(sock_fd, &msg, 0);
         while (1) {
+           recvmsg(sock_fd, &msg, 0); 
+           printf("Received the message\n");
            memset(lev_buf, 0, 4);
-           flag = 0;
-           do{
-               num = read(fp, lev_buf, 3); 
-               int i;
-               for (i=0; i<num; i++) {
-                    if((lev_buf[i] < '0') || (lev_buf[i] > '9')) lev_buf[i] = '\0';
-                    else 
-                        flag = 1;
-               } 
-           }while(!flag); 
+           strncpy(lev_buf, NLMSG_DATA(nlh),4);  
            memset(ps, 0, 4);
            strncpy(ps, "ps_", 3); 
            ptr = strncat(ps, lev_buf, 4);
-           write(fp, ((authenticate_system(ptr) == 0 )? "OK":"NO"),2);  
+           memset(nlh, 0, NLMSG_SPACE(MAX_PAYLOAD));
+           nlh->nlmsg_len = NLMSG_SPACE(MAX_PAYLOAD);
+           nlh->nlmsg_pid = getpid();
+           nlh->nlmsg_flags = 0;
+           if (authenticate_system(ptr) == 0) strncpy(NLMSG_DATA(nlh),"OK", 2);
+           else strncpy(NLMSG_DATA(nlh), "NO", 2);
+           sendmsg(sock_fd, &msg, 0);  
         }
-   close(fp);
+   close(sock_fd);   
    exit(EXIT_SUCCESS);
 }
